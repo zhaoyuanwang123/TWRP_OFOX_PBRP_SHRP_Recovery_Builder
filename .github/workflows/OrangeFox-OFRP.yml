@@ -6,11 +6,11 @@ on:
       MANIFEST_BRANCH:
         description: 'OrangeFox Manifest Branch'
         required: true
-        default: '12.1'
+        default: '14.1'
         type: choice
         options:
+        - 14.1
         - 12.1
-        - 11.0
       DEVICE_TREE:
         description: 'Custom Recovery Tree'
         required: true
