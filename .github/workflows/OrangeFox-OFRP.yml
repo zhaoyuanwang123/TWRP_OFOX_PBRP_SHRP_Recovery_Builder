@@ -12,23 +12,23 @@ on:
           - 14.1
           - 12.1
       DEVICE_TREE:
-        description: 'Custom Recovery Tree (URL)'
+        description: '你的设备树仓库 URL'
         required: true
-        default: 'https://github.com/<username>/<repo_name>'
+        default: 'https://github.com/zhaoyuanwang123/pad2'   # 改成你的实际仓库
       DEVICE_TREE_BRANCH:
-        description: 'Custom Recovery Tree Branch'
+        description: '设备树分支'
         required: true
-        default: 'main'
+        default: 'main'                                                         # 改成你的实际分支
       DEVICE_NAME:
-        description: 'Device Codename (PRODUCT_DEVICE)'
+        description: '设备代号（必须与 twrp_XXX.mk 中的 XXX 一致）'
         required: true
-        default: 'magicpad2'
+        default: 'rod2'                                                         # 根据 twrp_rod2.mk 填写
       DEVICE_PATH:
-        description: 'Device Path (e.g., device/honor/magicpad2)'
+        description: '设备树在源码中的路径（必须与 BoardConfig.mk 中的 DEVICE_PATH 一致）'
         required: true
-        default: 'device/honor/magicpad2'
+        default: 'device/honor/rod2'                                            # 根据你的 BoardConfig.mk 填写
       BUILD_TARGET:
-        description: 'Build Target'
+        description: '构建目标'
         required: true
         default: 'recovery'
         type: choice
@@ -37,12 +37,12 @@ on:
           - recovery
           - vendorboot
       LDCHECK:
-        description: 'Enable LDCHECK (dependency check)'
+        description: '启用依赖检查（可选）'
         required: false
         default: 'false'
         type: boolean
       LDCHECKPATH:
-        description: 'Path to blob for dependency check (e.g., system/bin/qseecomd)'
+        description: '检查目标二进制路径'
         required: true
         default: 'system/bin/qseecomd'
 
@@ -79,7 +79,7 @@ jobs:
             gperf libxml2-utils python3 python3-jinja2 libncurses5-dev \
             zlib1g-dev libssl-dev liblz4-tool libzstd-dev
 
-      - name: Setup Android Build Environment (OrangeFox scripts)
+      - name: Setup Android Build Environment
         run: |
           git clone https://gitlab.com/OrangeFox/misc/scripts.git
           cd scripts
@@ -110,13 +110,29 @@ jobs:
           cd ${{ inputs.DEVICE_PATH }}
           echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
+      # 关键步骤：从你的 Release 下载内核
+      - name: Download Prebuilt Kernel
+        run: |
+          cd ${{ env.ORANGEFOX_ROOT }}/${{ inputs.DEVICE_PATH }}
+          KERNEL_URL="https://github.com/zhaoyuanwang123/pad2/releases/download/1/kernel"
+          echo "Downloading kernel from $KERNEL_URL ..."
+          curl -L -o kernel "$KERNEL_URL" \
+            -H "User-Agent: Mozilla/5.0" \
+            --fail --retry 3 --retry-delay 2
+          if [ -f "kernel" ]; then
+            echo "Kernel downloaded successfully ($(ls -lh kernel | awk '{print $5}'))"
+            chmod 644 kernel
+          else
+            echo "::error::Failed to download kernel!"
+            exit 1
+          fi
+
       - name: Build OrangeFox
         run: |
           pushd ${{ env.ORANGEFOX_ROOT }}
           set +e
           export USE_CCACHE=1
           export CCACHE_EXEC=/usr/bin/ccache
-          # Fix sandbox issue in soong
           sed -i 's/return sandboxConfig\.working/return false/g' build/soong/ui/build/sandbox_linux.go
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
@@ -149,7 +165,7 @@ jobs:
             echo "zip_md5=$(md5sum "$zip_file" | cut -d ' ' -f1)" >> $GITHUB_OUTPUT
             echo "CHECK_ZIP=true" >> $GITHUB_ENV
           else
-            echo "::warning::No OrangeFox.zip found, but image may still be available."
+            echo "::warning::No OrangeFox.zip found."
           fi
 
           if [ -n "$tar_file" ]; then
@@ -168,19 +184,18 @@ jobs:
           name: Unofficial OrangeFox for ${{ inputs.DEVICE_NAME }} (${{ env.BUILD_DATE }})
           tag_name: ${{ github.run_id }}
           body: |
-            **Build Info**  
-            - Manifest Branch: `${{ inputs.MANIFEST_BRANCH }}`  
-            - Device Tree: [${{ inputs.DEVICE_TREE }}](tree/${{ inputs.DEVICE_TREE_BRANCH }})  
-            - Commit: [${{ env.COMMIT_ID }}](${{ inputs.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }})  
-            - MD5 (img): ${{ steps.locate_outputs.outputs.img_md5 }}  
-            - MD5 (zip): ${{ steps.locate_outputs.outputs.zip_md5 }}  
+            **Build Info**
+            - Manifest Branch: `${{ inputs.MANIFEST_BRANCH }}`
+            - Device Tree: [${{ inputs.DEVICE_TREE }}](tree/${{ inputs.DEVICE_TREE_BRANCH }})
+            - Commit: [${{ env.COMMIT_ID }}](${{ inputs.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }})
+            - MD5 (img): ${{ steps.locate_outputs.outputs.img_md5 }}
+            - MD5 (zip): ${{ steps.locate_outputs.outputs.zip_md5 }}
           prerelease: true
 
       - name: Run LDCHECK (if enabled)
         if: inputs.LDCHECK == 'true'
         continue-on-error: true
         run: |
-          # 复制工具到 recovery root
           ROOT_DIR="${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root"
           if [ -d "$ROOT_DIR" ]; then
             cd tools
@@ -188,7 +203,7 @@ jobs:
             [ -f ldcheck ] && mv -n ldcheck "$ROOT_DIR/"
             cd "$ROOT_DIR"
             python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ inputs.LDCHECKPATH }}
-            echo "LDCHECK completed. Check output for missing dependencies."
+            echo "LDCHECK completed."
           else
             echo "::warning::Recovery root not found, skipping LDCHECK."
           fi
